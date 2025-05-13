@@ -1,4 +1,5 @@
-# ADB Gripper
+# ADB Gripper![unnamed](https://github.com/user-attachments/assets/3932e1c9-c73a-49c4-8439-aff8800ca67c)
+
 
 A simple and modern GUI application for Windows, designed to facilitate the management of your Android devices via Android Debug Bridge (ADB).
 
