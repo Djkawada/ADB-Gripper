@@ -1,0 +1,73 @@
+name: Build ADB Gripper Binaries
+
+on:
+  push:
+    branches: [ "main" ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: ADB-Gripper-Windows.exe
+            asset_name: ADB-Gripper-Windows.exe
+          - os: ubuntu-latest
+            artifact_name: ADB-Gripper-Linux
+            asset_name: ADB-Gripper-Linux
+          - os: macos-latest
+            artifact_name: ADB-Gripper-MacOS
+            asset_name: ADB-Gripper-MacOS
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11' # Stable version for broad compatibility
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build with PyInstaller (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        pyinstaller --noconfirm --onefile --windowed --icon "mon_icone.ico" --name "ADB-Gripper-Windows" --collect-all customtkinter main_app.py
+
+    - name: Build with PyInstaller (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        # Install tkinter dev libraries needed for Linux build if not present in the runner
+        sudo apt-get update
+        sudo apt-get install -y python3-tk
+        pyinstaller --noconfirm --onefile --windowed --name "ADB-Gripper-Linux" --collect-all customtkinter main_app.py
+
+    - name: Build with PyInstaller (MacOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        pyinstaller --noconfirm --onefile --windowed --name "ADB-Gripper-MacOS" --collect-all customtkinter main_app.py
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.asset_name }}
+        path: dist/${{ matrix.artifact_name }}* # Wildcard to catch .app folder on Mac if not onefile binary or just the binary
+
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: dist/${{ matrix.artifact_name }}*

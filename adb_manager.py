@@ -26,6 +26,10 @@ class AdbManager:
              self.adb_available = True
              self._update_status("'adb' command found.", level="info")
 
+        self.logcat_process = None
+        self.logcat_thread = None
+        self._stop_logcat_event = threading.Event()
+
 
     def _is_adb_available(self):
         """Checks if the adb command is available in the system's PATH."""
@@ -461,8 +465,46 @@ class AdbManager:
              return True
         else:
              # _run_adb_command already updated status on failure/warning
-             # Note: Device might still be powering off even if ADB reported a warning/error
+        # else: Device might still be powering off even if ADB reported a warning/error
              return False
+
+
+    def install_apk(self, serial, apk_path):
+        """
+        Installs an APK file on the specified device.
+
+        Args:
+            serial: The serial number or IP:port of the target device.
+            apk_path: The full path to the .apk file to install.
+
+        Returns:
+            True if the installation reported success, False otherwise.
+        """
+        if not self.adb_available: return False
+        if not serial or not apk_path:
+             self._update_status("Error: Device and APK path must be specified for installation.", level="error")
+             return False
+
+        if not os.path.exists(apk_path):
+            self._update_status(f"Error: APK file not found at {apk_path}", level="error")
+            return False
+
+        self._update_status(f"Sending command: Installing {os.path.basename(apk_path)} on {serial}...", level="info")
+
+        # Basic install command. Could be extended with -r (reinstall) or -g (grant permissions)
+        command = ['adb', '-s', serial, 'install', '-r', apk_path]
+
+        # Installation can take a significant amount of time for large APKs
+        stdout, stderr, returncode = self._run_adb_command(command, timeout=300)
+
+        if returncode == 0 and "success" in stdout.lower():
+            self._update_status(f"Successfully installed {os.path.basename(apk_path)}.", level="info")
+            return True
+        else:
+            # _run_adb_command updates status for command errors/stderr
+            if returncode == 0 and "failure" in stdout.lower():
+                self._update_status(f"Installation reported failure: {stdout.strip()}", level="error")
+            return False
 
 
     def list_packages(self, serial, user_only=True):
@@ -595,6 +637,128 @@ class AdbManager:
         else:
             # _run_adb_command updates status for command errors/stderr
             return False
+
+
+    def get_package_details(self, serial, package_name):
+        """
+        Retrieves detailed information about a specific package.
+        Returns a dictionary with details.
+        """
+        if not self.adb_available: return None
+        if not serial or not package_name: return None
+
+        self._update_status(f"Fetching details for {package_name}...", level="info")
+
+        # We use 'dumpsys package' to get details. It's verbose, so we might want to just grep relevant lines if possible,
+        # but parsing in Python is more robust against cross-platform shell differences.
+        command = ['adb', '-s', serial, 'shell', 'dumpsys', 'package', package_name]
+        stdout, stderr, returncode = self._run_adb_command(command, timeout=10)
+
+        details = {
+            'package_name': package_name,
+            'version_name': 'Unknown',
+            'version_code': 'Unknown',
+            'installer': 'Unknown',
+            'first_install_time': 'Unknown',
+            'last_update_time': 'Unknown',
+            'uid': 'Unknown',
+            'permissions': []
+        }
+
+        if returncode == 0 and stdout:
+            lines = stdout.splitlines()
+            reading_perms = False
+            for line in lines:
+                line = line.strip()
+                if line.startswith('versionName='):
+                    details['version_name'] = line.split('=', 1)[1]
+                elif line.startswith('versionCode='):
+                    details['version_code'] = line.split('=', 1)[1].split(' ', 1)[0] # Handle "123 minSdk=..."
+                elif line.startswith('installerPackageName='):
+                    details['installer'] = line.split('=', 1)[1]
+                elif line.startswith('firstInstallTime='):
+                    details['first_install_time'] = line.split('=', 1)[1]
+                elif line.startswith('lastUpdateTime='):
+                    details['last_update_time'] = line.split('=', 1)[1]
+                elif line.startswith('userId='):
+                    details['uid'] = line.split('=', 1)[1]
+                elif line.startswith('requested permissions:'):
+                    reading_perms = True
+                elif reading_perms:
+                    if line.startswith('install permissions:') or line.startswith('runtime permissions:') or line == "":
+                        reading_perms = False
+                    else:
+                        details['permissions'].append(line)
+
+        return details
+
+
+    def start_logcat(self, serial, callback):
+        """
+        Starts a logcat stream in a separate thread.
+        Args:
+            serial: Device serial.
+            callback: Function to call with each new line of log (str).
+        """
+        if not self.adb_available or not serial:
+            self._update_status("Cannot start Logcat: ADB unavailable or no device.", level="error")
+            return
+
+        if self.logcat_process:
+            self.stop_logcat()
+
+        self._stop_logcat_event.clear()
+        
+        # Clear buffer first?
+        # self._run_adb_command(['adb', '-s', serial, 'logcat', '-c'], timeout=5)
+
+        command = ['adb', '-s', serial, 'logcat', '-v', 'time']
+        
+        def _logcat_worker():
+            try:
+                # Use subprocess.Popen for continuous stream
+                creationflags = 0
+                if sys.platform.startswith('win'):
+                    creationflags = subprocess.CREATE_NO_WINDOW
+                
+                self.logcat_process = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1, # Line buffered
+                    encoding='utf-8',
+                    errors='replace',
+                    creationflags=creationflags
+                )
+
+                while not self._stop_logcat_event.is_set():
+                    line = self.logcat_process.stdout.readline()
+                    if not line and self.logcat_process.poll() is not None:
+                        break # Process ended
+                    if line:
+                        callback(line.rstrip())
+            except Exception as e:
+                self._update_status(f"Logcat error: {e}", level="error")
+            finally:
+                self.stop_logcat()
+
+        self.logcat_thread = threading.Thread(target=_logcat_worker, daemon=True)
+        self.logcat_thread.start()
+        self._update_status(f"Logcat started for {serial}.", level="info")
+
+
+    def stop_logcat(self):
+        """Stops the currently running logcat process."""
+        self._stop_logcat_event.set()
+        if self.logcat_process:
+            self.logcat_process.terminate()
+            try:
+                self.logcat_process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                self.logcat_process.kill()
+            self.logcat_process = None
+            self._update_status("Logcat stopped.", level="info")
 
 
 # Example of how to use it (for testing the manager directly)

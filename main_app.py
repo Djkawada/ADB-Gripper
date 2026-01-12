@@ -147,6 +147,7 @@ class AdbGripperApp(ctk.CTk):
         # Add the tabs
         self.device_control_tab = self.functionality_tabview.add("Device Control")
         self.app_management_tab = self.functionality_tabview.add("App Management")
+        self.logcat_tab = self.functionality_tabview.add("Logcat")
 
 
         # --- Populate Device Control Tab ---
@@ -242,7 +243,8 @@ class AdbGripperApp(ctk.CTk):
         self.uninstall_controls_frame.grid_columnconfigure(1, weight=0) # Segmented Button
         self.uninstall_controls_frame.grid_columnconfigure(2, weight=1) # Spacer
         self.uninstall_controls_frame.grid_columnconfigure(3, weight=0) # Refresh Button
-        self.uninstall_controls_frame.grid_columnconfigure(4, weight=0) # Uninstall Button
+        self.uninstall_controls_frame.grid_columnconfigure(4, weight=0) # Details Button
+        self.uninstall_controls_frame.grid_columnconfigure(5, weight=0) # Uninstall Button
 
         ctk.CTkLabel(self.uninstall_controls_frame, text="Show:").grid(row=0, column=0, padx=(0, 10), sticky="w")
 
@@ -258,8 +260,11 @@ class AdbGripperApp(ctk.CTk):
         self.refresh_app_list_button = ctk.CTkButton(self.uninstall_controls_frame, text="Refresh List", command=self.list_apps_in_gui)
         self.refresh_app_list_button.grid(row=0, column=3, padx=(0, 10), sticky="w")
 
+        self.view_details_button = ctk.CTkButton(self.uninstall_controls_frame, text="Details", command=self.view_app_details, state="disabled", width=80)
+        self.view_details_button.grid(row=0, column=4, padx=(0, 10), sticky="w")
+
         self.uninstall_selected_button = ctk.CTkButton(self.uninstall_controls_frame, text="Uninstall Selected", command=self.uninstall_selected_apps, state="disabled", fg_color="darkred", hover_color="red")
-        self.uninstall_selected_button.grid(row=0, column=4, padx=(0, 0), sticky="w")
+        self.uninstall_selected_button.grid(row=0, column=5, padx=(0, 0), sticky="w")
 
 
         # Warning Label (initially hidden or showing mild warning)
@@ -273,6 +278,33 @@ class AdbGripperApp(ctk.CTk):
         self.app_list_scrollable_frame.grid(row=2, column=0, sticky="nsew", pady=(0, 10))
         # Configure grid inside the scrollable frame for app entries (Checkbox + Label)
         # These column weights will be set when populating the list
+
+
+        # --- Populate Logcat Tab ---
+        self.logcat_tab.grid_columnconfigure(0, weight=1)
+        self.logcat_tab.grid_rowconfigure(0, weight=0) # Controls
+        self.logcat_tab.grid_rowconfigure(1, weight=1) # Log area
+
+        # Logcat Controls
+        self.logcat_controls_frame = ctk.CTkFrame(self.logcat_tab, fg_color="transparent")
+        self.logcat_controls_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
+        
+        self.logcat_start_button = ctk.CTkButton(self.logcat_controls_frame, text="Start Logcat", command=self.start_logcat_gui)
+        self.logcat_start_button.pack(side="left", padx=5)
+
+        self.logcat_stop_button = ctk.CTkButton(self.logcat_controls_frame, text="Stop Logcat", command=self.stop_logcat_gui, state="disabled", fg_color="darkred")
+        self.logcat_stop_button.pack(side="left", padx=5)
+
+        self.logcat_clear_button = ctk.CTkButton(self.logcat_controls_frame, text="Clear", command=self.clear_logcat_gui, width=80)
+        self.logcat_clear_button.pack(side="left", padx=5)
+        
+        self.logcat_save_button = ctk.CTkButton(self.logcat_controls_frame, text="Save Log", command=self.save_logcat_gui, width=80)
+        self.logcat_save_button.pack(side="left", padx=5)
+
+        # Logcat Text Area
+        self.logcat_textbox = ctk.CTkTextbox(self.logcat_tab, activate_scrollbars=True)
+        self.logcat_textbox.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
+        self.logcat_textbox.configure(state="disabled") # Read-only initially
 
 
         # Bottom Frame (Status Bar)
@@ -859,9 +891,12 @@ class AdbGripperApp(ctk.CTk):
 
 
     def _on_app_checkbox_changed(self):
-        """Checks if any app checkbox is selected and updates the Uninstall button state."""
-        any_selected = any(checkbox.get() == 1 for checkbox in self.app_checkboxes.values())
-        self.uninstall_selected_button.configure(state="normal" if any_selected else "disabled")
+        """Checks if any app checkbox is selected and updates the Uninstall and Details button states."""
+        selected_count = sum(1 for checkbox in self.app_checkboxes.values() if checkbox.get() == 1)
+        
+        self.uninstall_selected_button.configure(state="normal" if selected_count > 0 else "disabled")
+        # Enable Details button only if exactly one app is selected
+        self.view_details_button.configure(state="normal" if selected_count == 1 else "disabled")
 
 
     def uninstall_selected_apps(self):
@@ -1034,6 +1069,122 @@ class AdbGripperApp(ctk.CTk):
         # Re-evaluate the uninstall button state after each attempt (in case the last selected was removed)
         # This happens via the final enable_functionality_widgets and list_apps_in_gui calls.
         pass # No need to call _on_app_checkbox_changed here per item anymore
+
+
+    # --- App Details Method ---
+    def view_app_details(self):
+        """Fetches and displays details for the single selected app."""
+        # Identify the selected package
+        selected_package = None
+        for pkg, checkbox in self.app_checkboxes.items():
+            if checkbox.get() == 1:
+                selected_package = pkg
+                break
+        
+        if not selected_package: return
+
+        if not self.current_device_serial or not self.adb_manager.adb_available:
+            self.update_status("Device not connected.", level="error")
+            return
+
+        self.update_status(f"Fetching details for {selected_package}...", level="info")
+        
+        # Run in thread
+        threading.Thread(target=self._perform_get_details_threaded, args=(self.current_device_serial, selected_package), daemon=True).start()
+
+    def _perform_get_details_threaded(self, serial, package_name):
+        details = self.adb_manager.get_package_details(serial, package_name)
+        self.after(0, lambda d=details: self._show_details_popup(d))
+
+    def _show_details_popup(self, details):
+        if not details:
+            self.update_status("Failed to fetch app details.", level="error")
+            return
+
+        # Create popup
+        popup = ctk.CTkToplevel(self)
+        popup.title(f"Details: {details['package_name']}")
+        popup.geometry("500x400")
+        popup.transient(self)
+        
+        # Grid layout
+        popup.grid_columnconfigure(0, weight=1)
+        popup.grid_columnconfigure(1, weight=3)
+
+        row = 0
+        for key, label_text in [
+            ('package_name', 'Package:'),
+            ('version_name', 'Version Name:'),
+            ('version_code', 'Version Code:'),
+            ('installer', 'Installer:'),
+            ('first_install_time', 'First Install:'),
+            ('last_update_time', 'Last Update:'),
+            ('uid', 'UID:'),
+        ]:
+            ctk.CTkLabel(popup, text=label_text, font=ctk.CTkFont(weight="bold")).grid(row=row, column=0, padx=10, pady=5, sticky="e")
+            ctk.CTkLabel(popup, text=details.get(key, 'N/A'), anchor="w").grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+            row += 1
+
+        # Permissions list
+        ctk.CTkLabel(popup, text="Permissions:", font=ctk.CTkFont(weight="bold")).grid(row=row, column=0, padx=10, pady=5, sticky="ne")
+        
+        perms_textbox = ctk.CTkTextbox(popup, height=150)
+        perms_textbox.grid(row=row, column=1, padx=10, pady=5, sticky="nsew")
+        popup.grid_rowconfigure(row, weight=1)
+        
+        perms_text = "\n".join(details.get('permissions', []))
+        perms_textbox.insert("0.0", perms_text)
+        perms_textbox.configure(state="disabled")
+
+        self.update_status(f"Details shown for {details['package_name']}.", level="info")
+
+
+    # --- Logcat Methods ---
+    def start_logcat_gui(self):
+        if not self.current_device_serial:
+            self.update_status("No device selected.", level="error")
+            return
+        
+        self.logcat_textbox.configure(state="normal") # clear logic needs this
+        # self.logcat_textbox.delete("0.0", "end") # Optional: auto-clear on start
+        self.logcat_textbox.configure(state="disabled")
+
+        self.logcat_start_button.configure(state="disabled")
+        self.logcat_stop_button.configure(state="normal")
+        
+        self.adb_manager.start_logcat(self.current_device_serial, self.update_logcat_gui)
+
+    def stop_logcat_gui(self):
+        self.adb_manager.stop_logcat()
+        self.logcat_start_button.configure(state="normal")
+        self.logcat_stop_button.configure(state="disabled")
+
+    def update_logcat_gui(self, line):
+        # This is called from a thread, so use after
+        self.after(0, lambda l=line: self._append_logcat_line(l))
+
+    def _append_logcat_line(self, line):
+        self.logcat_textbox.configure(state="normal")
+        self.logcat_textbox.insert("end", line)
+        self.logcat_textbox.see("end") # Auto-scroll
+        self.logcat_textbox.configure(state="disabled")
+
+    def clear_logcat_gui(self):
+        self.logcat_textbox.configure(state="normal")
+        self.logcat_textbox.delete("0.0", "end")
+        self.logcat_textbox.configure(state="disabled")
+
+    def save_logcat_gui(self):
+        file_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt")])
+        if file_path:
+            try:
+                content = self.logcat_textbox.get("0.0", "end")
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                self.update_status(f"Logcat saved to {os.path.basename(file_path)}", level="info")
+            except Exception as e:
+                self.update_status(f"Error saving logcat: {e}", level="error")
+
 
 # --- Run the application ---
 if __name__ == "__main__":
