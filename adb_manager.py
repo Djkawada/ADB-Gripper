@@ -748,87 +748,37 @@ class AdbManager:
         self._update_status(f"Logcat started for {serial}.", level="info")
 
 
-    def stop_logcat(self):
-        """Stops the currently running logcat process."""
-        self._stop_logcat_event.set()
-        if self.logcat_process:
-            self.logcat_process.terminate()
-            try:
-                self.logcat_process.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                self.logcat_process.kill()
-            self.logcat_process = None
-            self._update_status("Logcat stopped.", level="info")
+        def stop_logcat(self):
 
 
-# Example of how to use it (for testing the manager directly)
-# if __name__ == "__main__":
-#     # This section runs only when adb_manager.py is executed directly
-#     manager = AdbManager() # No status callback, will print to console
-#
-#     if manager.adb_available:
-#         devices = manager.list_devices()
-#         print("\n--- Detected Devices ---")
-#         if devices:
-#             for i, dev in enumerate(devices):
-#                 print(f"  {i}: Serial: {dev['serial']}, State: {dev['state']}, Description: {dev['description']}")
-#
-#             # Example: Get info for the first device found that is 'device' state
-#             connected_devices = [dev for dev in devices if dev['state'] == 'device']
-#             if connected_devices:
-#                  first_device_serial = connected_devices[0]['serial']
-#                  print(f"\n--- Info for {first_device_serial} ---")
-#                  info = manager.get_device_info(first_device_serial)
-#                  if info:
-#                      print(f"  Serial: {info.get('serial', 'N/A')}")
-#                      print(f"  Model: {info.get('model', 'N/A')}")
-#                      print(f"  Version: {info.get('version', 'N/A')}")
-#                      print(f"  Display Name: {info.get('display_name', 'N/A')}")
-#                      print(f"  Battery Level: {info.get('battery_level', 'N/A')}")
-#                  else:
-#                       print(f"\nFailed to get info for {first_device_serial}. Check status messages above.")
-#
-#                  # Example: List user apps
-#                  print(f"\n--- User Apps on {first_device_serial} ---")
-#                  user_apps = manager.list_packages(first_device_serial, user_only=True)
-#                  # if user_apps:
-#                  #     print("First user app:", user_apps[0])
-#                  #     # Example: Try uninstalling/disabling the first user app (use with caution!)
-#                  #     # uninstall_success = manager.uninstall_package(first_device_serial, user_apps[0])
-#                  #     # if not uninstall_success:
-#                  #     #     print(f"Uninstall failed for {user_apps[0]}, attempting to disable...")
-#                  #     #     disable_success = manager.disable_package(first_device_serial, user_apps[0])
-#                  #     #     if disable_success:
-#                  #     #          print(f"Successfully disabled {user_apps[0]}.")
-#                  #     #     else:
-#                  #     #          print(f"Failed to disable {user_apps[0]}.")
-#                  # else:
-#                  #      print("No user apps found.")
-#
-#                  # Example: List all apps
-#                  print(f"\n--- All Apps on {first_device_serial} ---")
-#                  all_apps = manager.list_packages(first_device_serial, user_only=False)
-#                  # if all_apps:
-#                  #     print("First system app:", all_apps[0])
-#                  # else:
-#                  #      print("No apps found.")
-#
-#             # Example connect (replace with a real IP if needed)
-#             # print("\n--- Connecting to IP ---")
-#             # success = manager.connect_device("192.168.1.100:5555")
-#             # print(f"Connect attempt success: {success}")
-#
-#             # Example reboot (replace with a real serial from your 'adb devices -l' output)
-#             # if connected_devices:
-#             #     print(f"\n--- Rebooting {first_device_serial} ---")
-#             #     manager.reboot_device(first_device_serial) # Normal reboot
-#
-#             # Example power off (replace with a real serial)
-#             # if connected_devices:
-#             #     print(f"\n--- Powering off {first_device_serial} ---")
-#             #     manager.power_off_device(first_device_serial)
-#
-#         else:
-#             print("No 'device' or 'unauthorized' devices found.")
-#     else:
-#          print("ADB command is not available.")
+            """Stops the currently running logcat process."""
+
+
+            self._stop_logcat_event.set()
+
+
+            if self.logcat_process:
+
+
+                self.logcat_process.terminate()
+
+
+                try:
+
+
+                    self.logcat_process.wait(timeout=1)
+
+
+                except subprocess.TimeoutExpired:
+
+
+                    self.logcat_process.kill()
+
+
+                self.logcat_process = None
+
+
+                self._update_status("Logcat stopped.", level="info")
+
+
+    

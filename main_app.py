@@ -604,10 +604,10 @@ class AdbGripperApp(ctk.CTk):
          self.battery_level_label.configure(text=f"Battery Level: {battery_level}") # Update battery level label
 
 
-         # --- Mettre à jour l'étiquette 'Selected Device' dans la zone de connexion ---
-         # Prioriser l'affichage : display_name > model > serial
+         # --- Update the 'Selected Device' label in the connection area ---
+         # Prioritize display: display_name > model > serial
 
-         text_to_display = "Selected Device: None" # Texte par défaut si aucune info valide n'est trouvée
+         text_to_display = "Selected Device: None" # Default text if no valid info found
 
          # Use the determined display_name for the main label
          if display_name and display_name not in ['N/A', 'Error']:
@@ -623,7 +623,7 @@ class AdbGripperApp(ctk.CTk):
          # Else: keep default "Selected Device: None"
 
 
-         # Mise à jour effective de l'étiquette
+         # Effective update of the label
          self.selected_device_label.configure(text=text_to_display)
 
 
