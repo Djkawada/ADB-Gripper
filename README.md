@@ -1,92 +1,102 @@
-# ADB Gripper![unnamed](https://github.com/user-attachments/assets/3932e1c9-c73a-49c4-8439-aff8800ca67c)
+# ADB Gripper
 
+![GitHub Release](https://img.shields.io/github/v/release/Djkawada/ADB-Gripper)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/Djkawada/ADB-Gripper/build.yml)
+![License](https://img.shields.io/github/license/Djkawada/ADB-Gripper)
+![Downloads](https://img.shields.io/github/downloads/Djkawada/ADB-Gripper/total)
 
-A simple and modern GUI application for Windows, Linux, and macOS, designed to facilitate the management of your Android devices via Android Debug Bridge (ADB).
+![unnamed](https://github.com/user-attachments/assets/3932e1c9-c73a-49c4-8439-aff8800ca67c)
+
+**ADB Gripper** is a simple, modern, and cross-platform GUI application designed to simplify the management of Android devices via the Android Debug Bridge (ADB).
 
 ## About
 
-ADB Gripper offers a user-friendly interface to perform common operations via ADB without needing to use the command line. Connect your devices and manage them easily.
+ADB Gripper provides a user-friendly interface to perform common ADB operations without the need for command-line interaction. Whether you need to reboot a device, install an APK, or manage apps, ADB Gripper makes it easy.
 
 ## Features
 
-* **Cross-platform support:** Runs on Windows, Linux, and macOS.
-* Lists connected Android devices via USB or TCP/IP (`adb devices`).
-* Allows connecting to a device by its IP address and port (`adb connect`).
-* Displays basic information about the selected device (model, Android version, battery level).
-* "Device Control" Tab:
-    * Reboot device normally (`adb reboot`).
-    * Reboot to Recovery mode (`adb reboot recovery`).
-    * Reboot to Bootloader mode (`adb reboot bootloader`).
-    * Power off the device (`adb shell reboot -p`).
- ![Capture d’écran 2025-05-13 155901](https://github.com/user-attachments/assets/3c5b0ca6-aaa1-4da8-a365-47119fb72998)
-* "App Management" Tab:
-    * Install an APK file on the selected device (`adb install`).
-    * List installed applications (user apps or all apps).
-    * Uninstall selected applications (`adb uninstall --user 0`).
-    * Disable selected applications (useful for non-uninstallable system apps, uses `adb shell pm disable-user`).
-![Capture d’écran 2025-05-13 160008](https://github.com/user-attachments/assets/02949f2e-7650-45ae-98ae-4bfc4bd6c2b3)
-<img width="668" alt="Capture d’écran 2025-05-13 160043" src="https://github.com/user-attachments/assets/3b80dd37-cb0e-47e2-af94-ba9e0de150a9" />
+*   **Cross-Platform:** Native support for **Windows**, **Linux**, and **macOS**.
+*   **Device Management:**
+    *   List connected devices (USB and TCP/IP).
+    *   Connect to devices via IP address (`adb connect`).
+    *   View detailed device info (Model, Android Version, Battery Level).
+*   **Device Control:**
+    *   Reboot to System, Recovery, or Bootloader.
+    *   Power off device.
+*   **App Management:**
+    *   Install APK files.
+    *   List installed applications (User apps or System apps).
+    *   Uninstall or Disable applications.
+    *   View detailed app information (Package name, Version, Permissions, etc.).
+*   **Logcat Viewer:** Real-time logcat streaming with save functionality.
+
+![Capture d’écran 2025-05-13 155901](https://github.com/user-attachments/assets/3c5b0ca6-aaa1-4da8-a365-47119fb72998)
 
 ## Prerequisites
 
-To use ADB Gripper, you **must** have:
+To use ADB Gripper, you must have **ADB** installed and configured:
 
-1.  **Android SDK Platform-Tools:** This package contains the `adb` tool.
-    * **Mandatory Requirement:** You can install the Platform Tools and ensure ADB is correctly added to your system's PATH by using my dedicated installer project available on GitHub: **[ADB Path Checker Installer](https://github.com/Djkawada/ADB-Path-Checker-Installer)**. Please visit the repository and follow the instructions there to get ADB properly set up on your system.
-2.  **ADB configured in your system's PATH:** The path to the directory containing the `adb` executable (usually the `platform-tools` folder within the Android SDK) must be added to your operating system's PATH environment variable. The linked project above should help with this.
+1.  **Android SDK Platform-Tools:** Ensure `adb` is installed.
+    *   *Windows Users:* You can use my [ADB Path Checker Installer](https://github.com/Djkawada/ADB-Path-Checker-Installer) to easily set this up.
+    *   *Linux/macOS Users:* Install via your package manager (e.g., `sudo apt install android-tools` on Ubuntu/Debian, `brew install android-platform-tools` on macOS).
+2.  **System PATH:** The `adb` executable must be in your system's PATH environment variable.
 
-If the `adb` command is not recognized in your terminal or command prompt, the application will not be able to function.
+## Installation
 
-## Installation and Usage
+### 📥 Download Binary (Recommended)
 
-You can run the application in two ways:
+No installation required! Simply download the latest executable for your operating system from the **[Releases Page](https://github.com/Djkawada/ADB-Gripper/releases)**.
 
-### 1. Run from Source Files (Requires Python)
+*   **Windows:** `ADB-Gripper-Windows.exe`
+*   **Linux:** `ADB-Gripper-Linux` (Make executable with `chmod +x ADB-Gripper-Linux`)
+*   **macOS:** `ADB-Gripper-MacOS`
 
-1.  **Install Python:** Ensure you have Python 3.x installed.
-2.  **Clone the Repository:** Clone this GitHub repository or download the source files.
-3.  **Install Python Dependencies:** Open a terminal or command prompt in the project directory and install the necessary libraries:
+### 🐍 Run from Source
+
+1.  **Clone the repository:**
     ```bash
-    pip install customtkinter
-    # The application also depends on tkinter and threading, which are included with standard Python.
-    # On Linux, you might need to install python3-tk explicitly (e.g., sudo apt install python3-tk).
+    git clone https://github.com/Djkawada/ADB-Gripper.git
+    cd ADB-Gripper
     ```
-4.  **Run the Application:** Launch the main script:
+2.  **Install dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+    *(Note: On Linux, you may also need `python3-tk`)*
+3.  **Run the app:**
     ```bash
     python main_app.py
     ```
 
-### 2. Use the Executable
+### 🐧 Arch Linux (AUR)
 
-Binaries are automatically built for Windows, Linux, and macOS via GitHub Actions. You can download the latest executable for your platform from the [Releases](https://github.com/Djkawada/ADB-Gripper/releases) section of this repository and run it directly.
+If you are on Arch Linux, you can install it from the AUR:
 
-**Note:** Even when using the executable, the prerequisite of **ADB configured in your PATH** is still necessary.
+```bash
+yay -S adb-gripper
+```
 
-## Building the Executable (for Developers)
+## Building
 
-If you want to compile the application into an executable file yourself, you can use PyInstaller:
+To build the executable yourself using PyInstaller:
 
-1.  **Install PyInstaller:** `pip install pyinstaller`
-2.  **Navigate to the Project Directory:** Open your terminal in the folder containing `main_app.py`.
-3.  **Run the PyInstaller Command:**
-    *   **Windows:**
-        ```bash
-        pyinstaller --onefile --windowed --icon="mon_icone.ico" --name "ADB-Gripper-Windows" --collect-all customtkinter main_app.py
-        ```
-    *   **Linux:**
-        ```bash
-        pyinstaller --onefile --windowed --name "ADB-Gripper-Linux" --collect-all customtkinter main_app.py
-        ```
-    *   **macOS:**
-        ```bash
-        pyinstaller --onefile --windowed --name "ADB-Gripper-MacOS" --collect-all customtkinter main_app.py
-        ```
-4.  The executable will be generated in the `dist` sub-directory.
+1.  Install PyInstaller: `pip install pyinstaller`
+2.  Run the build command for your platform:
 
-## Contribution
+    **Windows:**
+    ```bash
+    pyinstaller --noconfirm --onefile --windowed --icon "mon_icone.ico" --name "ADB-Gripper-Windows" --collect-all customtkinter main_app.py
+    ```
 
-If you would like to contribute to the project, please send me a pull request or create a new branch for your changes.
+    **Linux/macOS:**
+    ```bash
+    pyinstaller --noconfirm --onefile --windowed --name "ADB-Gripper-Linux" --collect-all customtkinter main_app.py
+    ```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-[Add your project's license information here, e.g., MIT, GPL, etc. If you haven't chosen a license yet, GitHub allows you to add one.]
+This project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file for details.
