@@ -939,15 +939,14 @@ class AdbGripperApp(ctk.CTk):
         if self.confirmation_dialog is not None and self.confirmation_dialog.winfo_exists():
             # Dialog is already open, bring it to front if needed or do nothing
             self.confirmation_dialog.lift()
+            self.confirmation_dialog.focus_force()
             return
 
         # Create the custom top-level dialog window
         self.confirmation_dialog = ctk.CTkToplevel(self)
         self.confirmation_dialog.title("Confirm Uninstallation")
         self.confirmation_dialog.geometry("400x400") # Adjust size as needed
-        self.confirmation_dialog.transient(self) # Keep dialog on top of main window
-        self.confirmation_dialog.grab_set() # Modal: disable interaction with main window
-
+        
         # Configure grid for the dialog window
         self.confirmation_dialog.grid_columnconfigure(0, weight=1)
         self.confirmation_dialog.grid_rowconfigure(0, weight=0) # Warning row
@@ -991,6 +990,13 @@ class AdbGripperApp(ctk.CTk):
         # Add Cancel and Confirm buttons to the button frame
         ctk.CTkButton(button_frame, text="Cancel", command=self._cancel_uninstall).grid(row=0, column=1, padx=(0, 10))
         ctk.CTkButton(button_frame, text="Confirm Uninstall", command=self._confirm_uninstall, fg_color="darkred", hover_color="red").grid(row=0, column=2)
+
+        # Apply modal behavior *after* widgets are created to avoid rendering issues (black screen)
+        self.confirmation_dialog.transient(self) # Keep dialog on top of main window
+        self.confirmation_dialog.update() # Force update to ensure widgets are drawn
+        self.confirmation_dialog.lift()   # Bring to front
+        self.confirmation_dialog.focus_force() # Force focus
+        self.confirmation_dialog.grab_set() # Modal: disable interaction with main window
 
 
     def _confirm_uninstall(self):
