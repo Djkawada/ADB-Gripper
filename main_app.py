@@ -337,6 +337,35 @@ class AdbGripperApp(ctk.CTk):
 
 
         # --- Initial Actions ---
+        # Set Window Icon
+        try:
+            # Handle path for PyInstaller (sys._MEIPASS) or normal run
+            if getattr(sys, 'frozen', False):
+                application_path = sys._MEIPASS
+            else:
+                application_path = os.path.dirname(os.path.abspath(__file__))
+            
+            icon_path = os.path.join(application_path, "mon_icone.ico")
+            
+            if os.path.exists(icon_path):
+                # On Windows, iconbitmap works with .ico
+                # On Linux, it often requires a bitmap or fails with .ico depending on the WM.
+                # We try a generic approach.
+                if sys.platform.startswith("win"):
+                    self.iconbitmap(icon_path)
+                else:
+                    # For Linux/Mac, trying to set the icon. 
+                    # Note: iconbitmap with .ico might fail on some Linux WMs.
+                    # Ideally we would use a png and tk.PhotoImage, but we only have .ico.
+                    # We attempt it, catching errors to avoid crash.
+                    try:
+                        self.wm_iconbitmap(bitmap=f"@{icon_path}")
+                    except Exception:
+                        pass # specific linux icon setting might fail without .xbm or .png
+            
+        except Exception as e:
+            print(f"Warning: Could not set icon: {e}")
+
         # Automatically list devices on startup if ADB is available
         if self.adb_manager.adb_available:
              # Run list_devices_in_gui in a thread on startup to avoid freezing UI
@@ -993,10 +1022,16 @@ class AdbGripperApp(ctk.CTk):
 
         # Apply modal behavior *after* widgets are created to avoid rendering issues (black screen)
         self.confirmation_dialog.transient(self) # Keep dialog on top of main window
-        self.confirmation_dialog.update() # Force update to ensure widgets are drawn
         self.confirmation_dialog.lift()   # Bring to front
-        self.confirmation_dialog.focus_force() # Force focus
-        self.confirmation_dialog.grab_set() # Modal: disable interaction with main window
+        
+        # Use a delayed call to grab_set to ensure the window is mapped and painted
+        # This fixes the "black window" issue on some Linux/Wayland configurations
+        def _make_modal():
+            if self.confirmation_dialog and self.confirmation_dialog.winfo_exists():
+                self.confirmation_dialog.grab_set()
+                self.confirmation_dialog.focus_force()
+        
+        self.after(200, _make_modal)
 
 
     def _confirm_uninstall(self):

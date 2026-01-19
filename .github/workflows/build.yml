@@ -48,7 +48,7 @@ jobs:
     - name: Build with PyInstaller (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        pyinstaller --noconfirm --onefile --windowed --icon "mon_icone.ico" --name "ADB-Gripper-Windows" --collect-all customtkinter main_app.py
+        pyinstaller --noconfirm --onefile --windowed --icon "mon_icone.ico" --add-data "mon_icone.ico;." --name "ADB-Gripper-Windows" --collect-all customtkinter main_app.py
 
     - name: Build with PyInstaller (Linux)
       if: matrix.os == 'ubuntu-latest'
@@ -56,12 +56,12 @@ jobs:
         # Install tkinter dev libraries needed for Linux build if not present in the runner
         sudo apt-get update
         sudo apt-get install -y python3-tk
-        pyinstaller --noconfirm --onefile --windowed --name "ADB-Gripper-Linux" --collect-all customtkinter main_app.py
+        pyinstaller --noconfirm --onefile --windowed --add-data "mon_icone.ico:." --name "ADB-Gripper-Linux" --collect-all customtkinter main_app.py
 
     - name: Build with PyInstaller (MacOS)
       if: matrix.os == 'macos-latest'
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "ADB-Gripper-MacOS" --collect-all customtkinter main_app.py
+        pyinstaller --noconfirm --onefile --windowed --add-data "mon_icone.ico:." --name "ADB-Gripper-MacOS" --collect-all customtkinter main_app.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
