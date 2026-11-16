@@ -14,10 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import os
+import re
 import subprocess
 import sys
-import os
-import threading # Included for potential future use with long-running tasks
+import threading
 
 class AdbManager:
     def __init__(self, status_callback=None):
@@ -119,13 +120,13 @@ class AdbManager:
         except FileNotFoundError:
             # This case should ideally be caught by _is_adb_available, but included for safety
             self._update_status("Error: ADB command not found during execution. Check PATH.", level="error")
-            return None, "ADB command not found", 1
+            return "", "ADB command not found", 1
         except subprocess.TimeoutExpired:
-             self._update_status(f"Error: ADB command timed out after {timeout} seconds.", level="error")
-             return None, "Command timed out", 1
+            self._update_status(f"Error: ADB command timed out after {timeout} seconds.", level="error")
+            return "", "Command timed out", 1
         except Exception as e:
             self._update_status(f"An unexpected error occurred while running ADB command: {e}", level="error")
-            return None, str(e), 1
+            return "", str(e), 1
 
 
     def _update_status(self, message, level="info"):
@@ -293,43 +294,33 @@ class AdbManager:
         ]
 
         fetched_values = {}
-        essential_info_fetched = {'model': False, 'version': False, 'battery': False} # Track essential fetches
+        essential_info_fetched = {'model': False, 'version': False, 'battery': False}
 
+        # Fetch all device properties in a single getprop call to avoid 15+ sequential adb invocations.
+        prop_pattern = re.compile(r'^\[([^\]]+)\]: \[(.*)\]$')
+        stdout_props, _, returncode_props = self._run_adb_command(
+            ['adb', '-s', serial, 'shell', 'getprop'], timeout=10
+        )
+        if returncode_props == 0 and stdout_props:
+            for line in stdout_props.splitlines():
+                match = prop_pattern.match(line.strip())
+                if match:
+                    key, val = match.group(1), match.group(2).strip().strip("'\"\r")
+                    if val:
+                        fetched_values[key] = val
 
-        # --- Fetch essential properties first ---
-        # Get Model
-        model_command = ['adb', '-s', serial, 'shell', 'getprop', 'ro.product.model']
-        stdout_model, stderr_model, returncode_model = self._run_adb_command(model_command, timeout=5)
-        if returncode_model == 0 and stdout_model:
-             model_value = stdout_model.strip().strip("'\"\r")
-             if model_value:
-                 info['model'] = model_value
-                 fetched_values['ro.product.model'] = info['model'] # Store in fetched_values too
-                 essential_info_fetched['model'] = True
-                 # print(f"DEBUG: Fetched ro.product.model: '{info['model']}'") # DEBUG PRINT
-             # else: _run_adb_command handles warning for empty stdout on success
-        # else: _run_adb_command handles error status
+        if 'ro.product.model' in fetched_values:
+            info['model'] = fetched_values['ro.product.model']
+            essential_info_fetched['model'] = True
 
-
-        # Get Android Version
-        version_command = ['adb', '-s', serial, 'shell', 'getprop', 'ro.build.version.release']
-        stdout_version, stderr_version, returncode_version = self._run_adb_command(version_command, timeout=5)
-        if returncode_version == 0 and stdout_version:
-             version_value = stdout_version.strip().strip("'\"\r")
-             if version_value:
-                 info['version'] = version_value
-                 essential_info_fetched['version'] = True
-                 # print(f"DEBUG: Fetched ro.build.version.release: '{info['version']}'") # DEBUG PRINT
-             # else: _run_adb_command handles warning for empty stdout on success
-        # else: _run_adb_command handles error status
-
+        if 'ro.build.version.release' in fetched_values:
+            info['version'] = fetched_values['ro.build.version.release']
+            essential_info_fetched['version'] = True
 
         # Get Battery Level
         battery_command = ['adb', '-s', serial, 'shell', 'dumpsys', 'battery']
         stdout_battery, stderr_battery, returncode_battery = self._run_adb_command(battery_command, timeout=5)
         if returncode_battery == 0 and stdout_battery:
-            # Parse battery output to find the level
-            # Output often contains a line like "level: 85"
             for line in stdout_battery.splitlines():
                 line = line.strip()
                 if line.startswith('level:'):
@@ -337,49 +328,19 @@ class AdbManager:
                         level_str = line.split(':')[1].strip()
                         info['battery_level'] = f"{level_str}%"
                         essential_info_fetched['battery'] = True
-                        # print(f"DEBUG: Fetched battery level: '{info['battery_level']}'") # DEBUG PRINT
-                        break # Found the level, no need to check other lines
-                    except (IndexError, ValueError) as e:
+                        break
+                    except (IndexError, ValueError):
                         self._update_status(f"Warning: Could not parse battery level line: '{line}'", level="warning")
-                        # print(f"DEBUG: Battery parsing error: {e}") # DEBUG PRINT
 
-        # else: _run_adb_command handles error status
-
-
-        # --- Fetch other potential name/model properties in preference order ---
         best_display_name_found = None
-
         for prop_name in prop_names_to_try:
-            # Skip properties we already explicitly fetched
-            if prop_name in ['ro.product.model', 'ro.build.version.release']:
-                 continue
-
-            command = ['adb', '-s', serial, 'shell', 'getprop', prop_name]
-            stdout, stderr, returncode = self._run_adb_command(command, timeout=5)
-            if returncode == 0 and stdout:
-                 value = stdout.strip().strip("'\"\r")
-                 # print(f"DEBUG: Fetched {prop_name}: '{value}'") # DEBUG PRINT
-                 if value: # Only store non-empty values
-                     fetched_values[prop_name] = value
-
-                     # Check if this value is a good candidate for display_name
-                     # Prioritize based on the order in prop_names_to_try
-                     # Only set if we haven't found a better one yet
-                     if best_display_name_found is None:
-                         if 'ro.product.model' in fetched_values and value == fetched_values['ro.product.model']:
-                              # If same as model, only prioritize if it's a marketname property
-                              if 'marketname' in prop_name.lower():
-                                   best_display_name_found = value
-                                #    print(f"DEBUG: Setting potential best_display_name_found (marketname): '{value}' from {prop_name}") # DEBUG PRINT
-                             # else: skip, it's just the model again
-                         else:
-                              # Value is different from model or model wasn't fetched yet, use it
-                              best_display_name_found = value
-                            #   print(f"DEBUG: Setting potential best_display_name_found: '{value}' from {prop_name}") # DEBUG PRINT
-
-
-            # _run_adb_command handles error status for individual fetches if returncode != 0 or stderr
-            # We don't increment errors_during_fetch_count for these non-essential properties
+            value = fetched_values.get(prop_name)
+            if not value:
+                continue
+            if value == fetched_values.get('ro.product.model') and 'marketname' not in prop_name.lower():
+                continue
+            best_display_name_found = value
+            break
 
 
         # --- Finalize display_name ---
@@ -732,30 +693,31 @@ class AdbManager:
         
         def _logcat_worker():
             try:
-                # Use subprocess.Popen for continuous stream
-                creationflags = 0
-                if sys.platform.startswith('win'):
-                    creationflags = subprocess.CREATE_NO_WINDOW
-                
-                self.logcat_process = subprocess.Popen(
+                creationflags = subprocess.CREATE_NO_WINDOW if sys.platform.startswith('win') else 0
+
+                proc = subprocess.Popen(
                     command,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                     text=True,
-                    bufsize=1, # Line buffered
+                    bufsize=1,
                     encoding='utf-8',
                     errors='replace',
                     creationflags=creationflags
                 )
+                self.logcat_process = proc
 
                 while not self._stop_logcat_event.is_set():
-                    line = self.logcat_process.stdout.readline()
-                    if not line and self.logcat_process.poll() is not None:
-                        break # Process ended
+                    if proc.stdout is None:
+                        break
+                    line = proc.stdout.readline()
+                    if not line and proc.poll() is not None:
+                        break
                     if line:
-                        callback(line.rstrip())
+                        callback(line.rstrip('\r\n'))
             except Exception as e:
-                self._update_status(f"Logcat error: {e}", level="error")
+                if not self._stop_logcat_event.is_set():
+                    self._update_status(f"Logcat error: {e}", level="error")
             finally:
                 self.stop_logcat()
 
@@ -763,38 +725,20 @@ class AdbManager:
         self.logcat_thread.start()
         self._update_status(f"Logcat started for {serial}.", level="info")
 
-
-        def stop_logcat(self):
-
-
-            """Stops the currently running logcat process."""
-
-
-            self._stop_logcat_event.set()
-
-
-            if self.logcat_process:
-
-
-                self.logcat_process.terminate()
-
-
-                try:
-
-
-                    self.logcat_process.wait(timeout=1)
-
-
-                except subprocess.TimeoutExpired:
-
-
-                    self.logcat_process.kill()
-
-
-                self.logcat_process = None
-
-
-                self._update_status("Logcat stopped.", level="info")
+    def stop_logcat(self):
+        """Stops the currently running logcat process."""
+        self._stop_logcat_event.set()
+        proc = self.logcat_process
+        self.logcat_process = None
+        if proc is not None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            except Exception:
+                pass
+            self._update_status("Logcat stopped.", level="info")
 
 
     

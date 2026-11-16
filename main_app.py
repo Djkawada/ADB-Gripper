@@ -34,6 +34,7 @@ class AdbGripperApp(ctk.CTk):
         self.title("ADB Gripper")
         self.geometry("800x600")
         self.minsize(600, 400)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         ctk.set_appearance_mode("System") # Modes: "System" (default), "Dark", "Light"
         ctk.set_default_color_theme("blue") # Themes: "blue" (default), "green", "dark-blue"
 
@@ -92,12 +93,15 @@ class AdbGripperApp(ctk.CTk):
         # Add widgets to the Connection Frame (placed using the connection_frame's internal grid)
         ctk.CTkLabel(self.connection_frame, text="Connected Devices:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
 
-        # Device Selection Dropdown - Will display formatted string "Serial (Description) [State]"
+        # Device Selection Dropdown - Will display formatted string "Serial [State]"
         # Initial state and text depend on adb availability check below
-        self.device_combobox = ctk.CTkComboBox(self.connection_frame, values=["Loading..."], state="disabled")
+        self.device_combobox = ctk.CTkComboBox(
+            self.connection_frame,
+            values=["Loading..."],
+            state="disabled",
+            command=self.on_device_selected,
+        )
         self.device_combobox.grid(row=0, column=1, padx=(0, 10), pady=5, sticky="ew") # 'ew' makes it expand east-west
-        # Bind the selection event - "<<ComboboxSelected>>" is a standard tkinter event name
-        self.device_combobox.bind("<<ComboboxSelected>>", self.on_device_selected)
 
         # Refresh Button
         self.refresh_button = ctk.CTkButton(self.connection_frame, text="Refresh", command=self.list_devices_in_gui)
@@ -426,8 +430,20 @@ class AdbGripperApp(ctk.CTk):
         # App Management - Uninstall Section Controls
         self.app_filter_button.configure(state=state)
         self.refresh_app_list_button.configure(state=state)
-        # Uninstall button starts disabled even when enabled, only active when apps are selected
+        # Uninstall and Details buttons start disabled even when enabled, only active when apps are selected
         self.uninstall_selected_button.configure(state="disabled")
+        self.view_details_button.configure(state="disabled")
+
+        # Logcat Controls
+        if enable:
+            if self.adb_manager.logcat_process is None:
+                self.logcat_start_button.configure(state="normal")
+                self.logcat_stop_button.configure(state="disabled")
+        else:
+            if self.adb_manager.logcat_process is not None:
+                self.adb_manager.stop_logcat()
+            self.logcat_start_button.configure(state="disabled")
+            self.logcat_stop_button.configure(state="disabled")
 
 
     # --- Device Listing Logic ---
@@ -454,33 +470,26 @@ class AdbGripperApp(ctk.CTk):
          """Performs device listing in a thread and updates GUI via self.after."""
          # Blocking call to AdbManager - returns list of device dicts (serial, state, description)
          devices = self.adb_manager.list_devices()
-         # We need to format the values for the combobox using the serial and state
          device_display_values = []
-         # Store the device info for later retrieval by serial
-         self.available_devices_info = {} # Dict to map serial -> device dict
+         devices_by_serial = {}
 
          for dev in devices:
              serial = dev['serial']
-             description = dev.get('description', '') # Get description from adb devices -l
              state = dev.get('state', '')
 
-             # Format the string displayed in the combobox - Show just Serial, add state if not 'device'
              display_str = serial
              if state in ['unauthorized', 'offline']:
                  display_str = f"{serial} [{state.capitalize()}]"
-             # For 'device' state, just show the serial
 
              device_display_values.append(display_str)
-             self.available_devices_info[serial] = dev # Store the full device info by serial
+             devices_by_serial[serial] = dev
+
+         self.after(0, self._update_device_list_gui, device_display_values, devices_by_serial)
 
 
-         # Use self.after to update GUI elements from the thread safely
-         # Schedule the update on the main GUI thread
-         self.after(0, self._update_device_list_gui, device_display_values)
-
-
-    def _update_device_list_gui(self, device_display_values):
+    def _update_device_list_gui(self, device_display_values, devices_by_serial):
          """Updates the GUI device list dropdown from data fetched in a thread."""
+         self.available_devices_info = devices_by_serial
          if device_display_values:
              self.device_combobox.configure(values=device_display_values, state="normal")
              # Select the first device and trigger the selection logic
@@ -488,8 +497,7 @@ class AdbGripperApp(ctk.CTk):
              current_value = self.device_combobox.get()
              if current_value not in device_display_values or current_value in ["No devices found", "Searching...", "ADB not found"]:
                   self.device_combobox.set(device_display_values[0])
-             # Explicitly call on_device_selected as setting the value doesn't always trigger binding
-             # Use self.after(0, ...) to ensure it runs after the combobox values are fully updated
+             # Explicitly call on_device_selected as setting the value doesn't trigger command
              self.after(0, self.on_device_selected)
          else:
              # No devices found
@@ -499,7 +507,6 @@ class AdbGripperApp(ctk.CTk):
              self.current_device_serial = None
              self.update_device_info(clear_only=True) # Clear info sidebar
              self.enable_functionality_widgets(False) # Disable controls
-             self.available_devices_info = {} # Clear stored device info
 
 
          # Re-enable refresh button after command finishes
@@ -512,7 +519,7 @@ class AdbGripperApp(ctk.CTk):
         if not self.adb_manager.adb_available:
             return # Do nothing if adb is not found
 
-        ip_address = self.ip_entry.get()
+        ip_address = self.ip_entry.get().strip()
         if not ip_address:
             self.update_status("Please enter an IP address to connect.", level="warning")
             return
@@ -559,40 +566,50 @@ class AdbGripperApp(ctk.CTk):
 
 
     # --- Device Selection and Info Update Logic ---
-    def on_device_selected(self, event=None):
+    def on_device_selected(self, selected_item_text=None):
         """Handles when a device is selected from the dropdown."""
-        selected_item_text = self.device_combobox.get()
-        # Parse the serial number from the displayed text (assuming "Serial (Description)" format or just "Serial")
-        # Find the first space or parenthesis to extract the serial
+        if selected_item_text is None:
+            selected_item_text = self.device_combobox.get()
+        # Parse the serial number from the displayed text (e.g. "Serial" or "Serial [Unauthorized]")
         serial = selected_item_text.split(' ')[0].split('(')[0].strip()
 
-
         # Only update if a valid serial is selected (not the placeholder/error text)
-        if serial and serial not in ["No", "ADB", "Selected", "Searching..."]: # Simple check against placeholder text parts
-             # Also check if this serial is actually in our list of available devices (important after refresh)
+        if serial and serial not in ["No", "ADB", "Selected", "Searching..."]:
              if serial in self.available_devices_info:
+                dev_info = self.available_devices_info[serial]
+                dev_state = dev_info.get('state', '')
                 self.current_device_serial = serial
-                # Update device info panel - This call will trigger a threaded fetch
-                # The selected_device_label will be updated *after* fetch is complete in _do_update_device_info_gui
-                self.selected_device_label.configure(text=f"Selected Device: {serial} (Fetching info...)") # Temporary status
-                self.update_device_info() # This triggers the fetch
-                # Enable functionality widgets now that a device is selected
-                self.enable_functionality_widgets(True)
-                # Also load the app list when a device is selected
-                self.list_apps_in_gui()
 
+                if dev_state != 'device':
+                    self.selected_device_label.configure(
+                        text=f"Selected Device: {serial} [{dev_state.capitalize()}]"
+                    )
+                    self.update_device_info(clear_only=True)
+                    self.enable_functionality_widgets(False)
+                    if dev_state == 'unauthorized':
+                        self.update_status(
+                            f"Device {serial} is unauthorized. Accept the USB debugging prompt on the device.",
+                            level="warning",
+                        )
+                    else:
+                        self.update_status(
+                            f"Device {serial} is {dev_state}. Cannot run ADB commands.",
+                            level="warning",
+                        )
+                    return
+
+                self.selected_device_label.configure(text=f"Selected Device: {serial} (Fetching info...)")
+                self.update_device_info()
+                self.enable_functionality_widgets(True)
+                self.list_apps_in_gui()
              else:
-                  # The selected serial is no longer in the available devices list (e.g., unplugged)
-                  # This case should ideally be handled by list_devices_in_gui refreshing automatically
-                  # after a disconnection, but adding a fallback refresh here just in case.
                   self.update_status(f"Selected device {serial} is no longer available. Refreshing list.", level="warning")
-                  self.list_devices_in_gui() # Refresh the list to update the dropdown
+                  self.list_devices_in_gui()
         else:
-             # No valid device selected (placeholder text)
              self.current_device_serial = None
              self.selected_device_label.configure(text="Selected Device: None")
-             self.update_device_info(clear_only=True) # Clear info display
-             self.enable_functionality_widgets(False) # Disable controls
+             self.update_device_info(clear_only=True)
+             self.enable_functionality_widgets(False)
 
 
     def update_device_info(self, clear_only=False):
@@ -1116,8 +1133,8 @@ class AdbGripperApp(ctk.CTk):
             elif result_status == "failed":
                  checkbox.configure(text=f"{package_name} (Failed)", text_color="red", state="disabled")
 
-            # Uncheck the box after processing (it's also disabled, but good practice)
-            checkbox.select(0)
+            # Uncheck the box after processing
+            checkbox.deselect()
 
         # The final list_apps_in_gui call will refresh the entire list, removing
         # uninstalled apps and showing disabled ones (if the filter allows).
@@ -1221,10 +1238,17 @@ class AdbGripperApp(ctk.CTk):
         self.after(0, lambda l=line: self._append_logcat_line(l))
 
     def _append_logcat_line(self, line):
+        if not self.winfo_exists():
+            return
         self.logcat_textbox.configure(state="normal")
-        self.logcat_textbox.insert("end", line)
+        self.logcat_textbox.insert("end", f"{line}\n")
         self.logcat_textbox.see("end") # Auto-scroll
         self.logcat_textbox.configure(state="disabled")
+
+    def _on_close(self):
+        """Ensure background logcat subprocess is stopped before closing the window."""
+        self.adb_manager.stop_logcat()
+        self.destroy()
 
     def clear_logcat_gui(self):
         self.logcat_textbox.configure(state="normal")

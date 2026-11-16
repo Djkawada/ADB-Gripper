@@ -85,12 +85,12 @@ To build the executable yourself using PyInstaller:
 
     **Windows:**
     ```bash
-    pyinstaller --noconfirm --onefile --windowed --icon "mon_icone.ico" --name "ADB-Gripper-Windows" --collect-all customtkinter main_app.py
+    pyinstaller --noconfirm --onefile --windowed --icon "mon_icone.ico" --add-data "mon_icone.ico;." --name "ADB-Gripper-Windows" --collect-all customtkinter main_app.py
     ```
 
     **Linux/macOS:**
     ```bash
-    pyinstaller --noconfirm --onefile --windowed --name "ADB-Gripper-Linux" --collect-all customtkinter main_app.py
+    pyinstaller --noconfirm --onefile --windowed --add-data "mon_icone.ico:." --name "ADB-Gripper-Linux" --collect-all customtkinter main_app.py
     ```
 
 ## Contributing
