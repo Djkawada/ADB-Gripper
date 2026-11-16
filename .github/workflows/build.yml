@@ -1,12 +1,12 @@
-name: Build ADB Gripper Binaries
+name: Build ADB Gripper Binaries (Rust)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "rust" ]
     tags:
-      - 'v*'
+      - 'rust-v*'
   pull_request:
-    branches: [ "main" ]
+    branches: [ "rust" ]
   workflow_dispatch:
 
 permissions:
@@ -21,56 +21,45 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: ADB-Gripper-Windows.exe
+            bin_path: target/release/adb-gripper.exe
             asset_name: ADB-Gripper-Windows.exe
           - os: ubuntu-latest
-            artifact_name: ADB-Gripper-Linux
+            bin_path: target/release/adb-gripper
             asset_name: ADB-Gripper-Linux
           - os: macos-latest
-            artifact_name: ADB-Gripper-MacOS
+            bin_path: target/release/adb-gripper
             asset_name: ADB-Gripper-MacOS
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11' # Stable version for broad compatibility
+      - name: Install Linux GUI dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev pkg-config
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-    - name: Build with PyInstaller (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        pyinstaller --noconfirm --onefile --windowed --icon "mon_icone.ico" --add-data "mon_icone.ico;." --name "ADB-Gripper-Windows" --collect-all customtkinter main_app.py
+      - name: Build release binary
+        run: cargo build --release
 
-    - name: Build with PyInstaller (Linux)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        # Install tkinter dev libraries needed for Linux build if not present in the runner
-        sudo apt-get update
-        sudo apt-get install -y python3-tk
-        pyinstaller --noconfirm --onefile --windowed --add-data "mon_icone.ico:." --name "ADB-Gripper-Linux" --collect-all customtkinter main_app.py
+      - name: Prepare release asset
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "${{ matrix.bin_path }}" "dist/${{ matrix.asset_name }}"
 
-    - name: Build with PyInstaller (MacOS)
-      if: matrix.os == 'macos-latest'
-      run: |
-        pyinstaller --noconfirm --onefile --windowed --add-data "mon_icone.ico:." --name "ADB-Gripper-MacOS" --collect-all customtkinter main_app.py
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/${{ matrix.asset_name }}
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ matrix.asset_name }}
-        path: dist/${{ matrix.artifact_name }}* # Wildcard to catch .app folder on Mac if not onefile binary or just the binary
-
-    - name: Release
-      uses: softprops/action-gh-release@v2
-      if: startsWith(github.ref, 'refs/tags/')
-      with:
-        files: dist/${{ matrix.artifact_name }}*
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/${{ matrix.asset_name }}
