@@ -1,0 +1,17 @@
+[package]
+name = "adb-gripper"
+version = "2.0.0"
+edition = "2021"
+description = "A simple, fast, native Rust GUI application to manage Android devices via ADB"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+eframe = "0.29"
+rfd = "0.15"
+image = { version = "0.25", default-features = false, features = ["ico"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
