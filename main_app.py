@@ -23,8 +23,9 @@ import tkinter.filedialog as filedialog # Needed for file selection dialog
 import tkinter.messagebox as messagebox # Still useful for other messages
 
 
-# Import the adb_manager
+# Import the adb_manager and bloatware database
 from adb_manager import AdbManager
+from bloatware_db import BRAND_DISPLAY_NAMES, classify_installed_packages, normalize_brand
 
 class AdbGripperApp(ctk.CTk):
     def __init__(self):
@@ -43,6 +44,8 @@ class AdbGripperApp(ctk.CTk):
         # This checks for ADB availability on initialization
         self.adb_manager = AdbManager(self.update_status)
         self.current_device_serial = None # Variable to store the currently selected device identifier
+        self.current_device_manufacturer = ""
+        self.current_device_brand = ""
         self.selected_apk_path = None # Variable to store the path of the selected APK file
 
         # Dictionary to store device info fetched by list_devices (serial -> device dict from adb devices -l)
@@ -51,6 +54,8 @@ class AdbGripperApp(ctk.CTk):
         self.current_app_packages = []
         # Dictionary to hold references to the app checkboxes for easy access {package_name: CTkCheckBox_widget}
         self.app_checkboxes = {}
+        # Dictionary to hold references to bloatware advisor checkboxes {package_name: CTkCheckBox_widget}
+        self.bloatware_checkboxes = {}
 
         # Variable to hold the reference to the confirmation dialog window
         self.confirmation_dialog = None
@@ -146,17 +151,15 @@ class AdbGripperApp(ctk.CTk):
         self.android_version_label = ctk.CTkLabel(self.info_frame, text="Android Version: N/A", anchor="w")
         self.android_version_label.grid(row=4, column=0, padx=10, pady=2, sticky="w") # Shifted down
 
-        self.battery_level_label = ctk.CTkLabel(self.info_frame, text="Battery Level: N/A", anchor="w") # Add Battery Level Label
-        self.battery_level_label.grid(row=5, column=0, padx=10, pady=2, sticky="w") # Added new row
+        self.battery_level_label = ctk.CTkLabel(self.info_frame, text="Battery Level: N/A", anchor="w")
+        self.battery_level_label.grid(row=5, column=0, padx=10, pady=2, sticky="w")
+        self.manufacturer_label = ctk.CTkLabel(self.info_frame, text="Manufacturer: N/A", anchor="w")
+        self.manufacturer_label.grid(row=6, column=0, padx=10, pady=2, sticky="w")
 
         # Configure rows in info_frame to not expand the top labels, pushing extra space down
-        self.info_frame.grid_rowconfigure(0, weight=0)
-        self.info_frame.grid_rowconfigure(1, weight=0)
-        self.info_frame.grid_rowconfigure(2, weight=0)
-        self.info_frame.grid_rowconfigure(3, weight=0) # Row for Commercial Name
-        self.info_frame.grid_rowconfigure(4, weight=0) # Row for Android Version
-        self.info_frame.grid_rowconfigure(5, weight=0) # Row for Battery Level
-        self.info_frame.grid_rowconfigure(6, weight=1) # Dummy row with weight 1
+        for r in range(7):
+            self.info_frame.grid_rowconfigure(r, weight=0)
+        self.info_frame.grid_rowconfigure(7, weight=1) # Dummy row with weight 1
 
 
         # Right Frame (Functionality Tabs)
@@ -167,6 +170,7 @@ class AdbGripperApp(ctk.CTk):
         # Add the tabs
         self.device_control_tab = self.functionality_tabview.add("Device Control")
         self.app_management_tab = self.functionality_tabview.add("App Management")
+        self.bloatware_tab = self.functionality_tabview.add("Bloatware Advisor")
         self.logcat_tab = self.functionality_tabview.add("Logcat")
 
 
@@ -326,6 +330,74 @@ class AdbGripperApp(ctk.CTk):
         self.logcat_textbox.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
         self.logcat_textbox.configure(state="disabled") # Read-only initially
 
+        # --- Populate Bloatware Advisor Tab ---
+        self.bloatware_tab.grid_columnconfigure(0, weight=1)
+        self.bloatware_tab.grid_rowconfigure(0, weight=0)
+        self.bloatware_tab.grid_rowconfigure(1, weight=0)
+        self.bloatware_tab.grid_rowconfigure(2, weight=1)
+
+        self.bloatware_controls_frame = ctk.CTkFrame(self.bloatware_tab, fg_color="transparent")
+        self.bloatware_controls_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
+        self.bloatware_controls_frame.grid_columnconfigure(0, weight=1)
+
+        self.bloatware_brand_label = ctk.CTkLabel(
+            self.bloatware_controls_frame,
+            text="Detected Maker: Not scanned",
+            font=ctk.CTkFont(weight="bold"),
+            anchor="w",
+        )
+        self.bloatware_brand_label.grid(row=0, column=0, padx=(0, 10), sticky="ew")
+
+        self.scan_bloatware_button = ctk.CTkButton(
+            self.bloatware_controls_frame,
+            text="Scan Device",
+            command=self.scan_bloatware_in_gui,
+            width=110,
+            state="disabled",
+        )
+        self.scan_bloatware_button.grid(row=0, column=1, padx=4)
+
+        self.select_safe_bloatware_button = ctk.CTkButton(
+            self.bloatware_controls_frame,
+            text="Select All Safe",
+            command=self.select_all_safe_bloatware,
+            width=115,
+            state="disabled",
+        )
+        self.select_safe_bloatware_button.grid(row=0, column=2, padx=4)
+
+        self.clear_bloatware_button = ctk.CTkButton(
+            self.bloatware_controls_frame,
+            text="Clear",
+            command=self.clear_bloatware_selection,
+            width=70,
+            state="disabled",
+        )
+        self.clear_bloatware_button.grid(row=0, column=3, padx=4)
+
+        self.uninstall_bloatware_button = ctk.CTkButton(
+            self.bloatware_controls_frame,
+            text="Remove Selected",
+            command=self.uninstall_selected_bloatware,
+            fg_color="darkred",
+            hover_color="red",
+            width=130,
+            state="disabled",
+        )
+        self.uninstall_bloatware_button.grid(row=0, column=4, padx=(4, 0))
+
+        self.bloatware_summary_label = ctk.CTkLabel(
+            self.bloatware_tab,
+            text="Connect a device to automatically detect its maker and scan for safe-to-remove bloatware.",
+            anchor="w",
+            wraplength=560,
+        )
+        self.bloatware_summary_label.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
+
+        self.bloatware_scrollable_frame = ctk.CTkScrollableFrame(self.bloatware_tab)
+        self.bloatware_scrollable_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.bloatware_scrollable_frame.grid_columnconfigure(0, weight=1)
+
 
         # Bottom Frame (Status Bar)
         # Placed in row 2, spanning both columns. Fixed height.
@@ -433,6 +505,13 @@ class AdbGripperApp(ctk.CTk):
         # Uninstall and Details buttons start disabled even when enabled, only active when apps are selected
         self.uninstall_selected_button.configure(state="disabled")
         self.view_details_button.configure(state="disabled")
+
+        # Bloatware Advisor Controls
+        self.scan_bloatware_button.configure(state=state)
+        if not enable:
+            self.select_safe_bloatware_button.configure(state="disabled")
+            self.clear_bloatware_button.configure(state="disabled")
+            self.uninstall_bloatware_button.configure(state="disabled")
 
         # Logcat Controls
         if enable:
@@ -623,6 +702,11 @@ class AdbGripperApp(ctk.CTk):
         self.commercial_name_label.configure(text="Commercial Name: N/A") # Clear commercial name
         self.android_version_label.configure(text="Android Version: N/A")
         self.battery_level_label.configure(text="Battery Level: N/A") # Clear battery level
+        self.manufacturer_label.configure(text="Manufacturer: N/A")
+        if clear_only:
+            self.current_device_manufacturer = ""
+            self.current_device_brand = ""
+            self.bloatware_brand_label.configure(text="Detected Maker: Not scanned")
 
 
         if not clear_only and self.current_device_serial and self.adb_manager.adb_available:
@@ -651,12 +735,19 @@ class AdbGripperApp(ctk.CTk):
 
          # Extract info, providing defaults if info is None or key is missing
          serial = info.get('serial', 'N/A') if info else 'N/A'
+         manufacturer = info.get('manufacturer', 'N/A') if info else 'N/A'
+         brand = info.get('brand', 'N/A') if info else 'N/A'
          model = info.get('model', 'N/A') if info else 'N/A'
          version = info.get('version', 'N/A') if info else 'N/A'
          # Get the display_name and battery_level fetched by AdbManager
          display_name = info.get('display_name', 'N/A') if info else 'N/A'
          battery_level = info.get('battery_level', 'N/A') if info else 'N/A'
 
+         self.current_device_manufacturer = manufacturer if manufacturer != 'N/A' else ""
+         self.current_device_brand = brand if brand != 'N/A' else ""
+         brand_key = normalize_brand(self.current_device_manufacturer, self.current_device_brand)
+         brand_display = BRAND_DISPLAY_NAMES.get(brand_key, "Generic Android")
+         raw_maker = manufacturer if manufacturer != 'N/A' else (brand if brand != 'N/A' else 'N/A')
 
          # --- Update Device Info sidebar labels ---
          self.serial_display_label.configure(text=f"Serial: {serial}")
@@ -664,6 +755,8 @@ class AdbGripperApp(ctk.CTk):
          self.commercial_name_label.configure(text=f"Commercial Name: {display_name}") # Update commercial name label
          self.android_version_label.configure(text=f"Android Version: {version}")
          self.battery_level_label.configure(text=f"Battery Level: {battery_level}") # Update battery level label
+         self.manufacturer_label.configure(text=f"Manufacturer: {raw_maker}")
+         self.bloatware_brand_label.configure(text=f"Detected Maker: {brand_display}")
 
 
          # --- Update the 'Selected Device' label in the connection area ---
@@ -687,6 +780,10 @@ class AdbGripperApp(ctk.CTk):
 
          # Effective update of the label
          self.selected_device_label.configure(text=text_to_display)
+
+         # Automatically scan for bloatware for the detected maker
+         if self.current_device_serial and info:
+             self.scan_bloatware_in_gui()
 
 
     # --- Device Control Methods ---
@@ -1112,9 +1209,10 @@ class AdbGripperApp(ctk.CTk):
 
         # All packages processed
         self.after(0, lambda: self.update_status("Uninstallation process complete.", level="info"))
-        # Re-enable GUI controls and refresh the app list using lambda
-        self.after(0, lambda: self.enable_functionality_widgets(True)) # Re-enable main controls
-        self.after(0, self.list_apps_in_gui) # Refresh the app list to reflect changes
+        # Re-enable GUI controls and refresh both the app list and bloatware advisor
+        self.after(0, lambda: self.enable_functionality_widgets(True))
+        self.after(0, self.list_apps_in_gui)
+        self.after(0, self.scan_bloatware_in_gui)
 
 
     def _handle_uninstall_result_gui(self, package_name, result_status):
@@ -1212,6 +1310,148 @@ class AdbGripperApp(ctk.CTk):
 
         self.update_status(f"Details shown for {details['package_name']}.", level="info")
 
+
+    # --- Bloatware Advisor Methods ---
+    def scan_bloatware_in_gui(self):
+        """Scans all installed packages on the device and classifies bloatware by maker."""
+        if not self.current_device_serial or not self.adb_manager.adb_available:
+            self.update_status("No device selected or ADB not available to scan bloatware.", level="warning")
+            return
+
+        self.scan_bloatware_button.configure(state="disabled")
+        self.select_safe_bloatware_button.configure(state="disabled")
+        self.clear_bloatware_button.configure(state="disabled")
+        self.uninstall_bloatware_button.configure(state="disabled")
+        self.bloatware_summary_label.configure(text="Scanning installed packages...")
+
+        for widget in self.bloatware_scrollable_frame.winfo_children():
+            widget.destroy()
+        self.bloatware_checkboxes = {}
+
+        threading.Thread(
+            target=self._perform_bloatware_scan_threaded,
+            args=(self.current_device_serial, self.current_device_manufacturer, self.current_device_brand),
+            daemon=True,
+        ).start()
+
+    def _perform_bloatware_scan_threaded(self, serial, manufacturer, brand):
+        packages = self.adb_manager.list_packages(serial, user_only=False)
+        classified = classify_installed_packages(packages, manufacturer=manufacturer, brand=brand)
+        self.after(0, lambda data=classified: self._update_bloatware_list_gui(data))
+
+    def _render_bloatware_section(self, start_row, title, title_color, entries, preselect):
+        """Renders a section of bloatware items with risk label and effect explanation."""
+        ctk.CTkLabel(
+            self.bloatware_scrollable_frame,
+            text=title,
+            text_color=title_color,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            anchor="w",
+        ).grid(row=start_row, column=0, padx=8, pady=(10, 4), sticky="ew")
+        row = start_row + 1
+
+        for entry in entries:
+            card = ctk.CTkFrame(self.bloatware_scrollable_frame)
+            card.grid(row=row, column=0, padx=6, pady=4, sticky="ew")
+            card.grid_columnconfigure(0, weight=1)
+
+            cb = ctk.CTkCheckBox(
+                card,
+                text=f"{entry['name']}  ({entry['package']})",
+                font=ctk.CTkFont(weight="bold"),
+                command=self._on_bloatware_checkbox_changed,
+            )
+            cb.grid(row=0, column=0, padx=10, pady=(8, 2), sticky="w")
+            if preselect:
+                cb.select()
+
+            ctk.CTkLabel(
+                card,
+                text=f"[{entry['source']}] {entry['description']}",
+                anchor="w",
+                justify="left",
+                wraplength=500,
+            ).grid(row=1, column=0, padx=(36, 10), pady=(0, 8), sticky="ew")
+
+            self.bloatware_checkboxes[entry["package"]] = (cb, entry["risk"])
+            row += 1
+
+        return row
+
+    def _update_bloatware_list_gui(self, classified):
+        """Populates the Bloatware Advisor scrollable frame with classified results."""
+        for widget in self.bloatware_scrollable_frame.winfo_children():
+            widget.destroy()
+        self.bloatware_checkboxes = {}
+
+        safe_items = classified.get("safe", [])
+        caution_items = classified.get("caution", [])
+        brand_label = classified.get("brand_label", "Generic Android")
+
+        self.bloatware_brand_label.configure(text=f"Detected Maker: {brand_label}")
+        self.bloatware_summary_label.configure(
+            text=(
+                f"Found {len(safe_items)} safe-to-remove app(s) (pre-selected) and "
+                f"{len(caution_items)} removable app(s) with feature trade-offs."
+            )
+        )
+
+        if not safe_items and not caution_items:
+            ctk.CTkLabel(
+                self.bloatware_scrollable_frame,
+                text="No known bloatware packages detected on this device.",
+                anchor="w",
+            ).grid(row=0, column=0, padx=10, pady=12, sticky="w")
+        else:
+            row = 0
+            if safe_items:
+                row = self._render_bloatware_section(
+                    row,
+                    f"Safe to Remove Without Risk ({len(safe_items)})",
+                    "green",
+                    safe_items,
+                    preselect=True,
+                )
+            if caution_items:
+                self._render_bloatware_section(
+                    row,
+                    f"Remove with Caution — Read Effect Before Removing ({len(caution_items)})",
+                    "orange",
+                    caution_items,
+                    preselect=False,
+                )
+
+        self.scan_bloatware_button.configure(state="normal")
+        has_items = bool(self.bloatware_checkboxes)
+        self.select_safe_bloatware_button.configure(state="normal" if safe_items else "disabled")
+        self.clear_bloatware_button.configure(state="normal" if has_items else "disabled")
+        self._on_bloatware_checkbox_changed()
+
+    def select_all_safe_bloatware(self):
+        """Selects all risk-free bloatware items."""
+        for cb, risk in self.bloatware_checkboxes.values():
+            if risk == "safe":
+                cb.select()
+        self._on_bloatware_checkbox_changed()
+
+    def clear_bloatware_selection(self):
+        """Unchecks all bloatware items."""
+        for cb, _ in self.bloatware_checkboxes.values():
+            cb.deselect()
+        self._on_bloatware_checkbox_changed()
+
+    def _on_bloatware_checkbox_changed(self):
+        selected_count = sum(1 for cb, _ in self.bloatware_checkboxes.values() if cb.get() == 1)
+        self.uninstall_bloatware_button.configure(state="normal" if selected_count > 0 else "disabled")
+
+    def uninstall_selected_bloatware(self):
+        """Opens the confirmation dialog for selected bloatware packages."""
+        selected = [pkg for pkg, (cb, _) in self.bloatware_checkboxes.items() if cb.get() == 1]
+        if not selected:
+            self.update_status("No bloatware packages selected.", level="warning")
+            return
+        self._packages_to_uninstall_in_dialog = selected
+        self.show_uninstall_confirmation(selected)
 
     # --- Logcat Methods ---
     def start_logcat_gui(self):

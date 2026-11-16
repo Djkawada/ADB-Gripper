@@ -268,6 +268,8 @@ class AdbManager:
         # Initialize info dictionary with defaults
         info = {
             'serial': serial,
+            'manufacturer': 'N/A',
+            'brand': 'N/A',
             'model': 'N/A',
             'version': 'N/A',
             'display_name': 'N/A', # The name we'll try to use for display
@@ -308,6 +310,16 @@ class AdbManager:
                     key, val = match.group(1), match.group(2).strip().strip("'\"\r")
                     if val:
                         fetched_values[key] = val
+
+        for key in ('ro.product.manufacturer', 'ro.product.vendor.manufacturer', 'ro.product.odm.manufacturer'):
+            if key in fetched_values:
+                info['manufacturer'] = fetched_values[key]
+                break
+
+        for key in ('ro.product.brand', 'ro.product.vendor.brand', 'ro.product.odm.brand'):
+            if key in fetched_values:
+                info['brand'] = fetched_values[key]
+                break
 
         if 'ro.product.model' in fetched_values:
             info['model'] = fetched_values['ro.product.model']
